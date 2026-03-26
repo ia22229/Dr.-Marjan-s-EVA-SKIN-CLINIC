@@ -16,7 +16,7 @@ const auth = new google.auth.GoogleAuth({
   scopes: ['https://www.googleapis.com/auth/spreadsheets'],
 });
 
-// Bot Memory (Stores where each patient is in the conversation)
+// Bot Memory
 const sessions = {}; 
 
 // Bilingual Dictionary
@@ -33,9 +33,7 @@ const text = {
     q_gender: "Please select your Gender:",
     btn_male: "Male", btn_female: "Female",
     done: "✅ Thank you! Your details have been successfully saved. Our team will contact you shortly.",
-
-http://googleusercontent.com/map_location_reference/1
-    loc_msg: "Here is the location for [Dr. Marjan's EVA SKIN CLINIC](http://googleusercontent.com/map_location_reference/0) 🏥:\nhttps://maps.app.goo.gl/4ZPH45KSqqNAP26YA"
+    loc_msg: "Here is the location for Dr. Marjan's Eva Skin Clinic 🏥:\nhttps://maps.app.goo.gl/4ZPH45KSqqNAP26YA"
   },
   ml: {
     welcome: "ഡോ. മർജാന്റെ ഈവ സ്കിൻ ക്ലിനിക്കിലേക്ക് സ്വാഗതം! ✨\nഞങ്ങൾ നിങ്ങളെ എങ്ങനെ സഹായിക്കണം?",
@@ -49,7 +47,7 @@ http://googleusercontent.com/map_location_reference/1
     q_gender: "നിങ്ങളുടെ ലിംഗഭേദം തിരഞ്ഞെടുക്കുക:",
     btn_male: "പുരുഷൻ", btn_female: "സ്ത്രീ",
     done: "✅ നന്ദി! നിങ്ങളുടെ വിവരങ്ങൾ സേവ് ചെയ്തിട്ടുണ്ട്. ഞങ്ങളുടെ ടീം നിങ്ങളെ ഉടൻ ബന്ധപ്പെടുന്നതാണ്.",
-    loc_msg: "[ഡോ. മർജാന്റെ ഈവ സ്കിൻ ക്ലിനിക്കിന്റെ](http://googleusercontent.com/map_location_reference/2) ലൊക്കേഷൻ ഇതാ 🏥:\nhttps://maps.app.goo.gl/4ZPH45KSqqNAP26YA"
+    loc_msg: "ഡോ. മർജാന്റെ ഈവ സ്കിൻ ക്ലിനിക്കിന്റെ ലൊക്കേഷൻ ഇതാ 🏥:\nhttps://maps.app.goo.gl/4ZPH45KSqqNAP26YA"
   }
 };
 
@@ -89,20 +87,18 @@ app.post('/webhook', async (req, res) => {
       const from = message.from;
       const phoneId = body.entry[0].changes[0].value.metadata.phone_number_id;
 
-      // Create a memory session for the user
       if (!sessions[from]) sessions[from] = { step: 'idle', lang: 'en', data: {} };
       const user = sessions[from];
 
       let originalText = '';
       let msgText = '';
       
-      // Check if they typed a message or clicked a button
       if (message.type === 'text') {
         originalText = message.text.body;
         msgText = originalText.toLowerCase();
       } else if (message.type === 'interactive') {
         msgText = message.interactive.button_reply.id;
-        originalText = message.interactive.button_reply.title; // Captures exactly what the button says
+        originalText = message.interactive.button_reply.title; 
       }
 
       // 1. CHOOSE LANGUAGE
@@ -157,13 +153,13 @@ app.post('/webhook', async (req, res) => {
           }
         });
       }
-      // 5. START QUESTIONS (Name)
+      // 5. START QUESTIONS
       else if (msgText === 'btn_exist' || msgText === 'btn_new') {
         user.type = msgText === 'btn_exist' ? 'existing' : 'new';
         user.step = 'ask_name';
         await sendMessage(phoneId, from, { type: "text", text: { body: text[user.lang].q_name } });
       }
-      // 6. COLLECTING ANSWERS STEP-BY-STEP
+      // 6. COLLECTING ANSWERS
       else if (user.step !== 'idle' && originalText) {
         const t = text[user.lang];
 
@@ -191,8 +187,6 @@ app.post('/webhook', async (req, res) => {
         else if (user.step === 'ask_place') {
           user.data.place = originalText;
           user.step = 'ask_gender';
-          
-          // Send Gender Options as Buttons!
           await sendMessage(phoneId, from, {
             type: "interactive",
             interactive: {
@@ -206,7 +200,7 @@ app.post('/webhook', async (req, res) => {
           });
         }
         else if (user.step === 'ask_gender') {
-          user.data.gender = originalText; // This records the button click directly
+          user.data.gender = originalText; 
           await saveToSheets(user.data);
           user.step = 'idle';
           await sendMessage(phoneId, from, { type: "text", text: { body: t.done } });
