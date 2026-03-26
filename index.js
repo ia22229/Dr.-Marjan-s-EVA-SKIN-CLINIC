@@ -16,19 +16,51 @@ const auth = new google.auth.GoogleAuth({
   scopes: ['https://www.googleapis.com/auth/spreadsheets'],
 });
 
-// Keep-Alive Page for UptimeRobot
-app.get('/', (req, res) => res.send('Eva Clinic Bot is Live! ✨'));
+// Bot Memory (Stores where each patient is in the conversation)
+const sessions = {}; 
 
-// Meta Webhook Verification
+// Bilingual Dictionary
+const text = {
+  en: {
+    welcome: "Welcome to Dr. Marjan's Eva Skin Clinic! ✨\nHow can we help you today?",
+    btn_book: "Booking", btn_loc: "Our Location",
+    reg_type: "Please select your registration type:",
+    btn_exist: "Already a patient", btn_new: "New registration", btn_back: "Back",
+    q_name: "Please enter your Name:",
+    q_phone: "Please enter your Mobile Number:",
+    q_age: "Please enter your Age or DOB:",
+    q_place: "Please enter your Place:",
+    q_gender: "Please select your Gender:",
+    btn_male: "Male", btn_female: "Female",
+    done: "✅ Thank you! Your details have been successfully saved. Our team will contact you shortly.",
+
+http://googleusercontent.com/map_location_reference/1
+    loc_msg: "Here is the location for [Dr. Marjan's EVA SKIN CLINIC](http://googleusercontent.com/map_location_reference/0) 🏥:\nhttps://maps.app.goo.gl/4ZPH45KSqqNAP26YA"
+  },
+  ml: {
+    welcome: "ഡോ. മർജാന്റെ ഈവ സ്കിൻ ക്ലിനിക്കിലേക്ക് സ്വാഗതം! ✨\nഞങ്ങൾ നിങ്ങളെ എങ്ങനെ സഹായിക്കണം?",
+    btn_book: "ബുക്കിംഗ്", btn_loc: "ലൊക്കേഷൻ",
+    reg_type: "നിങ്ങളുടെ രജിസ്ട്രേഷൻ തരം തിരഞ്ഞെടുക്കുക:",
+    btn_exist: "നിലവിലെ രോഗി", btn_new: "പുതിയ രോഗി", btn_back: "തിരികെ",
+    q_name: "നിങ്ങളുടെ പേര് നൽകുക:",
+    q_phone: "നിങ്ങളുടെ മൊബൈൽ നമ്പർ നൽകുക:",
+    q_age: "നിങ്ങളുടെ പ്രായം അല്ലെങ്കിൽ ജനനത്തീയതി നൽകുക:",
+    q_place: "നിങ്ങളുടെ സ്ഥലം നൽകുക:",
+    q_gender: "നിങ്ങളുടെ ലിംഗഭേദം തിരഞ്ഞെടുക്കുക:",
+    btn_male: "പുരുഷൻ", btn_female: "സ്ത്രീ",
+    done: "✅ നന്ദി! നിങ്ങളുടെ വിവരങ്ങൾ സേവ് ചെയ്തിട്ടുണ്ട്. ഞങ്ങളുടെ ടീം നിങ്ങളെ ഉടൻ ബന്ധപ്പെടുന്നതാണ്.",
+    loc_msg: "[ഡോ. മർജാന്റെ ഈവ സ്കിൻ ക്ലിനിക്കിന്റെ](http://googleusercontent.com/map_location_reference/2) ലൊക്കേഷൻ ഇതാ 🏥:\nhttps://maps.app.goo.gl/4ZPH45KSqqNAP26YA"
+  }
+};
+
+app.get('/', (req, res) => res.send('Eva Clinic Bilingual Bot is Live! ✨'));
+
 app.get('/webhook', (req, res) => {
   if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === verifyToken) {
     res.status(200).send(req.query['hub.challenge']);
-  } else {
-    res.sendStatus(403);
-  }
+  } else { res.sendStatus(403); }
 });
 
-// Helper function to send messages easily
 async function sendMessage(phoneId, to, data) {
   await axios({
     method: 'POST',
@@ -38,7 +70,17 @@ async function sendMessage(phoneId, to, data) {
   });
 }
 
-// Main Bot Logic
+async function saveToSheets(data) {
+  const timestamp = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+  const sheets = google.sheets({ version: 'v4', auth });
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: spreadsheetId,
+    range: 'Sheet1!A:F',
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: [[timestamp, data.name || '', data.phone || '', data.age || '', data.place || '', data.gender || '']] },
+  });
+}
+
 app.post('/webhook', async (req, res) => {
   try {
     const body = req.body;
@@ -47,96 +89,128 @@ app.post('/webhook', async (req, res) => {
       const from = message.from;
       const phoneId = body.entry[0].changes[0].value.metadata.phone_number_id;
 
-      // Figure out if they typed text OR clicked a button
+      // Create a memory session for the user
+      if (!sessions[from]) sessions[from] = { step: 'idle', lang: 'en', data: {} };
+      const user = sessions[from];
+
+      let originalText = '';
       let msgText = '';
+      
+      // Check if they typed a message or clicked a button
       if (message.type === 'text') {
-        msgText = message.text.body.toLowerCase();
+        originalText = message.text.body;
+        msgText = originalText.toLowerCase();
       } else if (message.type === 'interactive') {
         msgText = message.interactive.button_reply.id;
+        originalText = message.interactive.button_reply.title; // Captures exactly what the button says
       }
 
-      // 1. WELCOME MENU (Triggered by typing "hi" or clicking "Back")
-      if (msgText === 'hi' || msgText === 'hello' || msgText === 'btn_back') {
+      // 1. CHOOSE LANGUAGE
+      if (msgText === 'hi' || msgText === 'hello') {
+        user.step = 'idle';
+        user.data = {}; 
         await sendMessage(phoneId, from, {
           type: "interactive",
           interactive: {
             type: "button",
-            body: { text: "Welcome to Dr. Marjan's Eva Skin Clinic! ✨\nHow can we help you today?" },
-            action: {
-              buttons: [
-                { type: "reply", reply: { id: "btn_booking", title: "Booking" } },
-                { type: "reply", reply: { id: "btn_location", title: "Our Location" } }
-              ]
-            }
+            body: { text: "Please choose your language / ദയവായി നിങ്ങളുടെ ഭാഷ തിരഞ്ഞെടുക്കുക:" },
+            action: { buttons: [
+                { type: "reply", reply: { id: "lang_en", title: "English" } },
+                { type: "reply", reply: { id: "lang_ml", title: "മലയാളം" } }
+            ] }
           }
         });
-      } 
-      
-      // 2. LOCATION BUTTON CLICKED
+      }
+      // 2. WELCOME MENU
+      else if (msgText === 'lang_en' || msgText === 'lang_ml' || msgText === 'btn_back') {
+        if (msgText.startsWith('lang_')) user.lang = msgText === 'lang_en' ? 'en' : 'ml';
+        const t = text[user.lang];
+        await sendMessage(phoneId, from, {
+          type: "interactive",
+          interactive: {
+            type: "button",
+            body: { text: t.welcome },
+            action: { buttons: [
+                { type: "reply", reply: { id: "btn_booking", title: t.btn_book } },
+                { type: "reply", reply: { id: "btn_location", title: t.btn_loc } }
+            ] }
+          }
+        });
+      }
+      // 3. LOCATION
       else if (msgText === 'btn_location') {
-        await sendMessage(phoneId, from, {
-          type: "text",
-          text: { body: "Here is the location for Dr. Marjan's Eva Skin Clinic 🏥:\nhttps://maps.app.goo.gl/4ZPH45KSqqNAP26YA" }
-        });
-      } 
-      
-      // 3. BOOKING BUTTON CLICKED
+        await sendMessage(phoneId, from, { type: "text", text: { body: text[user.lang].loc_msg } });
+      }
+      // 4. BOOKING TYPE
       else if (msgText === 'btn_booking') {
+        const t = text[user.lang];
         await sendMessage(phoneId, from, {
           type: "interactive",
           interactive: {
             type: "button",
-            body: { text: "Please select your registration type:" },
-            action: {
-              buttons: [
-                { type: "reply", reply: { id: "btn_existing", title: "Already a patient" } },
-                { type: "reply", reply: { id: "btn_new", title: "New registration" } },
-                { type: "reply", reply: { id: "btn_back", title: "Back" } }
-              ]
-            }
+            body: { text: t.reg_type },
+            action: { buttons: [
+                { type: "reply", reply: { id: "btn_exist", title: t.btn_exist } },
+                { type: "reply", reply: { id: "btn_new", title: t.btn_new } },
+                { type: "reply", reply: { id: "btn_back", title: t.btn_back } }
+            ] }
           }
         });
-      } 
-      
-      // 4. ALREADY A PATIENT CLICKED
-      else if (msgText === 'btn_existing') {
-        await sendMessage(phoneId, from, {
-          type: "text",
-          text: { body: "Welcome back! ✨\n\nPlease type your details in a single message (on separate lines):\n1. Name\n2. Mobile Number" }
-        });
-      } 
-      
-      // 5. NEW REGISTRATION CLICKED
-      else if (msgText === 'btn_new') {
-        await sendMessage(phoneId, from, {
-          type: "text",
-          text: { body: "We look forward to seeing you! ✨\n\nPlease type your details in a single message (on separate lines):\n1. Name\n2. Mobile Number\n3. Age or DOB\n4. Place\n5. Gender" }
-        });
-      } 
-      
-      // 6. SAVING TO GOOGLE SHEETS (Triggered when they type multiple lines)
-      else if (message.type === 'text' && message.text.body.includes('\n')) {
-        const lines = message.text.body.split('\n');
-        const name = lines[0] || '';
-        const phone = lines[1] || '';
-        // If they are an existing patient, lines 2, 3, and 4 will just be empty!
-        const age = lines[2] || '';
-        const place = lines[3] || '';
-        const gender = lines[4] || '';
-        const timestamp = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+      }
+      // 5. START QUESTIONS (Name)
+      else if (msgText === 'btn_exist' || msgText === 'btn_new') {
+        user.type = msgText === 'btn_exist' ? 'existing' : 'new';
+        user.step = 'ask_name';
+        await sendMessage(phoneId, from, { type: "text", text: { body: text[user.lang].q_name } });
+      }
+      // 6. COLLECTING ANSWERS STEP-BY-STEP
+      else if (user.step !== 'idle' && originalText) {
+        const t = text[user.lang];
 
-        const sheets = google.sheets({ version: 'v4', auth });
-        await sheets.spreadsheets.values.append({
-          spreadsheetId: spreadsheetId,
-          range: 'Sheet1!A:F',
-          valueInputOption: 'USER_ENTERED',
-          requestBody: { values: [[timestamp, name, phone, age, place, gender]] },
-        });
-
-        await sendMessage(phoneId, from, {
-          type: "text",
-          text: { body: `✅ Thank you, ${name}!\nYour details have been successfully saved. Our team will contact you shortly.` }
-        });
+        if (user.step === 'ask_name') {
+          user.data.name = originalText;
+          user.step = 'ask_phone';
+          await sendMessage(phoneId, from, { type: "text", text: { body: t.q_phone } });
+        } 
+        else if (user.step === 'ask_phone') {
+          user.data.phone = originalText;
+          if (user.type === 'existing') {
+             await saveToSheets(user.data);
+             user.step = 'idle';
+             await sendMessage(phoneId, from, { type: "text", text: { body: t.done } });
+          } else {
+             user.step = 'ask_age';
+             await sendMessage(phoneId, from, { type: "text", text: { body: t.q_age } });
+          }
+        }
+        else if (user.step === 'ask_age') {
+          user.data.age = originalText;
+          user.step = 'ask_place';
+          await sendMessage(phoneId, from, { type: "text", text: { body: t.q_place } });
+        }
+        else if (user.step === 'ask_place') {
+          user.data.place = originalText;
+          user.step = 'ask_gender';
+          
+          // Send Gender Options as Buttons!
+          await sendMessage(phoneId, from, {
+            type: "interactive",
+            interactive: {
+              type: "button",
+              body: { text: t.q_gender },
+              action: { buttons: [
+                  { type: "reply", reply: { id: "gender_male", title: t.btn_male } },
+                  { type: "reply", reply: { id: "gender_female", title: t.btn_female } }
+              ] }
+            }
+          });
+        }
+        else if (user.step === 'ask_gender') {
+          user.data.gender = originalText; // This records the button click directly
+          await saveToSheets(user.data);
+          user.step = 'idle';
+          await sendMessage(phoneId, from, { type: "text", text: { body: t.done } });
+        }
       }
     }
     res.sendStatus(200);
