@@ -1,3 +1,11 @@
+// Add this right after 'const app = express();'
+app.get('/', (req, res) => {
+    res.send('Eva Clinic Bot is Live and Ready! ✨');
+});
+
+
+
+
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
